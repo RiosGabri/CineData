@@ -1,0 +1,97 @@
+from datetime import datetime, timedelta
+
+# Data final: hoje
+data_fim_default = datetime.now()
+
+# Data inicial: 7 dias antes
+data_inicio_default = data_fim_default - timedelta(days=7)
+
+dbutils.widgets.text(
+    "data_inicio",
+    data_inicio_default.strftime("%m-%d-%Y"),
+    "Data início (MM-DD-AAAA)"
+)
+
+dbutils.widgets.text(
+    "data_fim",
+    data_fim_default.strftime("%m-%d-%Y"),
+    "Data fim (MM-DD-AAAA)"
+)
+
+
+
+data_inicio = dbutils.widgets.get("data_inicio")
+data_fim = dbutils.widgets.get("data_fim")
+
+print(f"Data início: {data_inicio}")
+print(f"Data fim: {data_fim}")
+
+
+
+import requests
+
+url = (
+    "https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/"
+    "CotacaoDolarPeriodo"
+    f"(dataInicial=@dataInicial,dataFinalCotacao=@dataFinalCotacao)"
+    f"?@dataInicial='{data_inicio}'"
+    f"&@dataFinalCotacao='{data_fim}'"
+    "&$select=dataHoraCotacao,cotacaoCompra"
+    "&$format=json"
+)
+
+print(url)
+response = requests.get(url, timeout=30)
+
+print(f"Status HTTP: {response.status_code}")
+
+response.raise_for_status()
+
+dados_cotacao = response.json()
+
+print(f"Registros retornados: {len(dados_cotacao['value'])}")
+
+
+
+df_cotacao = spark.createDataFrame(dados_cotacao["value"])
+display(df_cotacao)
+
+
+
+df_cotacao_bronze = (
+    df_cotacao
+    .withColumn("ingestion_datetime", current_timestamp())
+)
+
+display(df_cotacao_bronze)
+
+
+
+(
+    df_cotacao_bronze
+    .write
+    .format("delta")
+    .mode("append")
+    .saveAsTable("meu_catalog.bronze.tb_cotacao_dolar")
+)
+
+
+
+
+display(
+    spark.sql("""
+        SELECT *
+        FROM meu_catalog.bronze.tb_cotacao_dolar
+        ORDER BY dataHoraCotacao
+    """)
+)
+
+spark.sql("""
+    DESCRIBE TABLE meu_catalog.bronze.tb_cotacao_dolar
+""").show(truncate=False)
+
+display(
+    spark.sql("""
+        SHOW TABLES IN meu_catalog.bronze
+    """)
+)
